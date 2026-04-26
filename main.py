@@ -84,9 +84,12 @@ Retorne JSON com:
   "observacoes": []
 }
 
-Não invente função mecânica se o usuário não pediu.
-Se for suporte, encaixe, carga ou peça prática, trate como funcional.
-Se for escultura, personagem, animal ou arte, trate como artístico/decorativo.
+Regras:
+- Não invente função mecânica se o usuário não pediu.
+- Se for suporte, encaixe, carga ou peça prática, trate como funcional.
+- Se for escultura, personagem, animal ou arte, trate como artístico/decorativo.
+- Se o pedido for vago, escolha uma interpretação plausível e imprimível.
+- O campo "objeto" deve ser curto e útil para virar nome de arquivo.
 """
     result = ask_ai(system, prompt, json_mode=True)
     return json.loads(result)
@@ -133,6 +136,9 @@ Importante:
 - Não force base plana se isso destruir o design.
 - Para peça funcional, priorize resistência, encaixe e estabilidade.
 - Para peça artística, preserve forma visual sem tornar impossível de imprimir.
+- Para suporte de celular, pense em centro de gravidade, trava frontal, encosto, ângulo e base.
+- Para animais/decorativos, pense em silhueta reconhecível, corpo, cabeça, membros, asas, olhos ou detalhes simples.
+- Para caixas/organizadores, pense em espessura de parede, cavidade, abertura e cantos arredondados.
 
 Retorne JSON:
 {
@@ -210,7 +216,6 @@ QUALIDADE:
 SAÍDA:
 Retorne apenas o código OpenSCAD final.
 """
-
     user = {
         "pedido_interpretado": data,
         "engenharia": engineering,
@@ -228,6 +233,8 @@ Retorne apenas o código OpenSCAD final.
 
     scad = ask_ai(system, json.dumps(user, ensure_ascii=False))
     return clean_scad(scad)
+
+
 # ===============================
 # 5. AGENTE VALIDADOR
 # ===============================
@@ -247,13 +254,15 @@ Retorne JSON:
 }
 
 Critérios:
-- Compilação provável no OpenSCAD
-- Correspondência com o pedido
-- Peças conectadas quando necessário
-- Espessura mínima
-- Orientação de impressão
-- Necessidade de suporte aceitável
-- Não reprovar apenas por não ter base plana
+- Compilação provável no OpenSCAD.
+- Correspondência com o pedido.
+- Peças conectadas quando necessário.
+- Espessura mínima.
+- Orientação de impressão.
+- Necessidade de suporte aceitável.
+- Não reprovar apenas por não ter base plana.
+- Reprove se o código parecer genérico demais para o pedido.
+- Reprove se um pedido artístico virar só cubos simples sem silhueta reconhecível.
 """
     payload = {
         "scad": scad_code,
@@ -282,6 +291,9 @@ Regras:
 - Não transforme tudo em cubo.
 - Preserve a intenção do usuário.
 - Se houver erro de compilação, corrija.
+- Se o validador disse que não parece atender ao pedido, aumente a correspondência visual.
+- Se for suporte, mantenha funcionalidade real.
+- Se for objeto artístico, melhore silhueta e detalhes reconhecíveis.
 """
     payload = {
         "scad_atual": scad_code,
@@ -314,6 +326,13 @@ Retorne JSON:
   "orientacao": "",
   "observacoes": []
 }
+
+Leve em conta:
+- Tipo do objeto.
+- Se é funcional ou decorativo.
+- Se precisa de suporte.
+- Orientação de impressão recomendada.
+- Material recomendado.
 """
     payload = {
         "requisitos": data,
@@ -403,7 +422,7 @@ def agente():
             "interpretação",
             "monetização",
             "engenharia",
-            "CAD",
+            "CAD avançado",
             "validação",
             "correção",
             "slicer",
@@ -454,4 +473,3 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=int(os.environ.get("PORT", 8080))
     )
-  
