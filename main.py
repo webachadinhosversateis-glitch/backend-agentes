@@ -8,14 +8,17 @@ import re
 import json
 
 # ===============================
-# OPENAI (SEM QUEBRAR)
+# OPENAI (OPCIONAL - NÃO QUEBRA)
 # ===============================
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 client = None
 if OPENAI_API_KEY:
-    from openai import OpenAI
-    client = OpenAI(api_key=OPENAI_API_KEY)
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=OPENAI_API_KEY)
+    except:
+        client = None
 
 # ===============================
 # APP
@@ -40,6 +43,9 @@ def gerar_nome(prompt):
     base = re.sub(r"[^a-z0-9]+", "_", prompt.lower()).strip("_")
     return (base[:40] or "modelo") + ".stl"
 
+def get_library_path():
+    return os.path.join(os.path.dirname(__file__), "library.json")
+
 # ===============================
 # ORIGINALIZADOR (ANTI CÓPIA)
 # ===============================
@@ -57,7 +63,7 @@ def originalizer(prompt):
 # ===============================
 def search_library(prompt):
     try:
-        with open("library.json") as f:
+        with open(get_library_path(), "r", encoding="utf-8") as f:
             data = json.load(f)
 
         for item in data:
@@ -120,7 +126,7 @@ Regras:
 - Use union(), difference(), hull()
 - Gere formas bonitas e funcionais
 - Evite formas simples como cubo puro
-- Use proporções reais
+- Use proporções realistas
 """
 
         resp = client.chat.completions.create(
