@@ -1,15 +1,21 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from openai import OpenAI
 import subprocess
 import uuid
 import os
 import json
 import re
 
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+if OPENAI_API_KEY:
+    from openai import OpenAI
+    client = OpenAI(api_key=OPENAI_API_KEY)
+else:
+    client = None
+
 app = FastAPI()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 app.add_middleware(
     CORSMiddleware,
@@ -21,6 +27,9 @@ app.add_middleware(
 
 
 def ask_ai(system, user, json_mode=False):
+    if not client:
+        raise Exception("OPENAI_API_KEY não encontrada no Railway")
+
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         response_format={"type": "json_object"} if json_mode else None,
@@ -59,6 +68,19 @@ def generate_filename(data, prompt):
         base = "modelo_gerado"
 
     return f"{base}.stl"
+
+
+def fallback_scad(prompt):
+    return """
+    union() {
+        cube([80, 60, 5]);
+        translate([0, 42, 5])
+            rotate([65, 0, 0])
+            cube([80, 5, 85]);
+        translate([0, 8, 5])
+            cube([80, 8, 12]);
+    }
+    """
 
 
 # ===============================
@@ -367,10 +389,38 @@ def generate_stl(scad_code):
         return f.read()
 
 
+def fallback_pipeline(prompt):
+    data = {
+        "objeto": prompt,
+        "tipo": "funcional",
+        "complexidade": "baixo",
+        "precisao": "basico"
+    }
+    scad = fallback_scad(prompt)
+    stl = generate_stl(scad)
+    filename = generate_filename(data, prompt)
+
+    metadata = {
+        "tokens": 0,
+        "objeto": data["objeto"],
+        "tipo": data["tipo"],
+        "complexidade": data["complexidade"],
+        "precisao": data["precisao"],
+        "slicer": {},
+        "filename": filename,
+        "ia_ativa": False
+    }
+
+    return stl, metadata, filename
+
+
 # ===============================
 # PIPELINE COMPLETO
 # ===============================
 def run_pipeline(prompt):
+    if not client:
+        return fallback_pipeline(prompt)
+
     data = interpretation_agent(prompt)
     tokens = monetization_agent(data)
     engineering = engineering_agent(data)
@@ -397,7 +447,8 @@ def run_pipeline(prompt):
         "complexidade": data.get("complexidade", ""),
         "precisao": data.get("precisao", ""),
         "slicer": slicer,
-        "filename": filename
+        "filename": filename,
+        "ia_ativa": True
     }
 
     return stl, metadata, filename
@@ -410,6 +461,7 @@ def run_pipeline(prompt):
 def home():
     return {
         "status": "online",
+        "ia_ativa": bool(client),
         "mensagem": "API IA 3D multiagente funcionando"
     }
 
@@ -418,6 +470,7 @@ def home():
 def agente():
     return {
         "status": "ok",
+        "ia_ativa": bool(client),
         "agentes": [
             "interpretação",
             "monetização",
@@ -448,7 +501,8 @@ async def gerar(req: Request):
                 "X-Model-Type": metadata["tipo"],
                 "X-Precision": metadata["precisao"],
                 "X-Filename": filename,
-                "Access-Control-Expose-Headers": "Content-Disposition, X-Tokens-Used, X-Model-Type, X-Precision, X-Filename"
+                "X-IA-Ativa": str(metadata["ia_ativa"]),
+                "Access-Control-Expose-Headers": "Content-Disposition, X-Tokens-Used, X-Model-Type, X-Precision, X-Filename, X-IA-Ativa"
             }
         )
 
