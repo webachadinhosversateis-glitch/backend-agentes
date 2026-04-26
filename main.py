@@ -5,10 +5,9 @@ import subprocess
 import uuid
 import os
 import re
-import json
 
 # ===============================
-# OPENAI (OPCIONAL - NÃO QUEBRA)
+# OPENAI (OPCIONAL)
 # ===============================
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
@@ -37,77 +36,63 @@ app.add_middleware(
 # UTIL
 # ===============================
 def clean_scad(text):
-    return re.sub(r"```.*?", "", text).strip()
+    text = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
+    return text.strip()
 
 def gerar_nome(prompt):
     base = re.sub(r"[^a-z0-9]+", "_", prompt.lower()).strip("_")
     return (base[:40] or "modelo") + ".stl"
 
-def get_library_path():
-    return os.path.join(os.path.dirname(__file__), "library.json")
+# ===============================
+# VALIDAÇÃO FORTE
+# ===============================
+def validate_scad(scad):
+
+    if not scad or len(scad) < 20:
+        return False
+
+    valid_keywords = ["cube", "sphere", "cylinder", "union", "difference", "hull"]
+
+    if not any(k in scad for k in valid_keywords):
+        return False
+
+    if scad.count("(") != scad.count(")"):
+        return False
+
+    if scad.count("{") != scad.count("}"):
+        return False
+
+    return True
 
 # ===============================
-# ORIGINALIZADOR (ANTI CÓPIA)
-# ===============================
-def originalizer(prompt):
-    swaps = {
-        "naruto": "ninja anime",
-        "goku": "guerreiro anime cabelo espetado"
-    }
-    for k, v in swaps.items():
-        prompt = prompt.lower().replace(k, v)
-    return prompt
-
-# ===============================
-# LIBRARY (INTELIGÊNCIA BASE)
-# ===============================
-def search_library(prompt):
-    try:
-        with open(get_library_path(), "r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        for item in data:
-            for tag in item["tags"]:
-                if tag in prompt.lower():
-                    return item
-
-        return None
-    except:
-        return None
-
-# ===============================
-# FALLBACK (NUNCA QUEBRA)
+# FALLBACK (SEMPRE FUNCIONA)
 # ===============================
 def fallback_scad(prompt):
+    return """
+    union() {
+        cube([80,60,5]);
+        translate([0,40,0])
+            rotate([65,0,0])
+            cube([80,5,100]);
+        translate([20,0,5])
+            cube([40,10,10]);
+    }
+    """
 
-    if "borboleta" in prompt:
-        return """
-        union() {
-            hull() {
-                translate([-20,0,0]) sphere(10);
-                translate([-40,20,0]) sphere(5);
-                translate([-40,-20,0]) sphere(5);
-            }
-            hull() {
-                translate([20,0,0]) sphere(10);
-                translate([40,20,0]) sphere(5);
-                translate([40,-20,0]) sphere(5);
-            }
-            cylinder(h=40, r=2, center=true);
-        }
-        """
+# ===============================
+# AUTO CORREÇÃO DE SCAD
+# ===============================
+def repair_scad(scad):
+    scad = scad.strip()
 
-    if "suporte" in prompt:
-        return """
-        union() {
-            cube([80,60,5]);
-            translate([0,40,0])
-                rotate([65,0,0])
-                cube([80,5,100]);
-        }
-        """
+    # fecha parênteses
+    while scad.count("(") > scad.count(")"):
+        scad += ")"
 
-    return "sphere(30);"
+    while scad.count("{") > scad.count("}"):
+        scad += "}"
+
+    return scad
 
 # ===============================
 # CAD AGENT (IA)
@@ -119,14 +104,27 @@ def cad_agent(prompt):
 
     try:
         system = """
-Você é um modelador 3D profissional.
+Você é um engenheiro especialista em OpenSCAD.
 
-Regras:
-- Retorne SOMENTE código OpenSCAD
-- Use union(), difference(), hull()
-- Gere formas bonitas e funcionais
-- Evite formas simples como cubo puro
-- Use proporções realistas
+REGRAS OBRIGATÓRIAS:
+
+- Retorne SOMENTE código OpenSCAD válido
+- Código deve rodar sem erro no OpenSCAD
+- Use apenas:
+  cube(), sphere(), cylinder(), union(), difference(), hull()
+
+- Sempre feche:
+  ()
+  {}
+
+- NÃO explique nada
+- NÃO use markdown
+
+- Sempre gerar modelo imprimível:
+  - base estável
+  - espessura mínima 3mm
+
+Se houver dúvida, gere algo simples e funcional
 """
 
         resp = client.chat.completions.create(
@@ -135,20 +133,18 @@ Regras:
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.4
+            temperature=0.3
         )
 
-        return clean_scad(resp.choices[0].message.content)
+        scad = clean_scad(resp.choices[0].message.content)
+
+        # tentativa de correção automática
+        scad = repair_scad(scad)
+
+        return scad
 
     except:
         return fallback_scad(prompt)
-
-# ===============================
-# VALIDAÇÃO
-# ===============================
-def validate_scad(scad):
-    if not scad or len(scad) < 10:
-        raise Exception("SCAD inválido")
 
 # ===============================
 # GERAR STL
@@ -176,20 +172,17 @@ def generate_stl(scad):
         return f.read()
 
 # ===============================
-# PIPELINE
+# PIPELINE COMPLETO
 # ===============================
 def pipeline(prompt):
 
-    prompt = originalizer(prompt)
-
-    ref = search_library(prompt)
-
-    if ref:
-        prompt = f"{prompt} baseado em {ref['nome']}"
-
     scad = cad_agent(prompt)
 
-    validate_scad(scad)
+    if not validate_scad(scad):
+        scad = repair_scad(scad)
+
+    if not validate_scad(scad):
+        scad = fallback_scad(prompt)
 
     return generate_stl(scad)
 
@@ -207,7 +200,6 @@ async def gerar(req: Request):
         prompt = body.get("prompt", "")
 
         stl = pipeline(prompt)
-
         nome = gerar_nome(prompt)
 
         return Response(
