@@ -1,6 +1,3 @@
-
-
-```python
 from fastapi import FastAPI, Request
 from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -35,13 +32,13 @@ async def generate_tripo_model(prompt):
         with urllib.request.urlopen(req) as response:
             create_res = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
-        raise Exception(f"Erro ao iniciar tarefa na Tripo: {e.read().decode('utf-8')}")
+        raise Exception(f"Erro na API Tripo: {e.read().decode('utf-8')}")
         
     task_id = create_res.get("data", {}).get("task_id")
     if not task_id:
-        raise Exception("A API da Tripo não retornou um ID de tarefa.")
+        raise Exception("API não retornou ID de tarefa.")
         
-    print(f"Tarefa {task_id} criada. Aguardando a IA...")
+    print(f"Tarefa {task_id} criada.")
     
     model_url = None
     poll_url = f"https://api.tripo3d.ai/v2/openapi/task/{task_id}"
@@ -58,7 +55,7 @@ async def generate_tripo_model(prompt):
                     model_url = data.get("result", {}).get("model", {}).get("url")
                     break
                 elif status in ["failed", "cancelled", "unknown"]:
-                    raise Exception("A geração do modelo falhou na Tripo3D.")
+                    raise Exception("A geração do modelo falhou.")
         except Exception:
             continue
             
@@ -73,7 +70,7 @@ async def generate_tripo_model(prompt):
 
 @app.get("/")
 def home():
-    return {"status": "online", "modo": "tripo3d_nativa"}
+    return {"status": "online"}
 
 @app.post("/gerar")
 async def gerar(req: Request):
@@ -92,7 +89,6 @@ async def gerar(req: Request):
             headers={"Content-Disposition": f"attachment; filename={filename}"}
         )
     except Exception as e:
-        print("Erro:", str(e))
         return JSONResponse(status_code=500, content={"erro": str(e)})
 
 @app.post("/melhorar-prompt")
@@ -105,25 +101,18 @@ async def route_improve_prompt(req: Request):
         if openai_key:
             from openai import OpenAI
             client = OpenAI(api_key=openai_key)
-            system_msg = "Você é um tradutor especialista em Midjourney/Tripo3D. Transforme o pedido em um prompt em INGLÊS focado em textura e realismo (ex: 'A highly detailed 3D model of a...', '8k resolution'). Retorne APENAS o prompt em inglês."
+            system_msg = "Você é tradutor. Transforme em prompt em INGLÊS focado em textura (ex: 'A highly detailed 3D model...'). Retorne SÓ o texto."
             resp = client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_msg},
-                    {"role": "user", "content": prompt_original}
-                ],
+                messages=[{"role": "system", "content": system_msg}, {"role": "user", "content": prompt_original}],
                 temperature=0.4
             )
-            sugestao = resp.choices[0].message.content.replace("\"", "")
-            return JSONResponse({"sugestao": sugestao})
+            return JSONResponse({"sugestao": resp.choices[0].message.content.replace("\"", "")})
         else:
-            sugestao = f"A highly detailed 3D model of {prompt_original}, 8k resolution, realistic textures"
-            return JSONResponse({"sugestao": sugestao})
-            
+            return JSONResponse({"sugestao": f"A highly detailed 3D model of {prompt_original}, 8k resolution"})
     except Exception as e:
         return JSONResponse(status_code=500, content={"erro": str(e)})
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
-```
