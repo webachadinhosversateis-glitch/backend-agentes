@@ -124,6 +124,7 @@ def fallback_scad(prompt):
 def interpretation_agent(prompt):
     if not client:
         return {
+            "valido": True,
             "objeto": prompt,
             "funcao": "modelo 3D",
             "tipo": "funcional" if "suporte" in prompt.lower() else "decorativo",
@@ -138,8 +139,12 @@ def interpretation_agent(prompt):
 
     system = """
 Você é um agente interpretador para uma plataforma de modelagem 3D por IA.
+Verifique primeiro se o pedido do usuário faz sentido para criar um objeto físico e palpável em uma impressora 3D. 
+Se for um pedido absurdo (ex: me faça um poema, como fazer um bolo, escreva um código) ou conceitos não físicos, defina "valido": false.
+
 Retorne JSON:
 {
+  "valido": true,
   "objeto": "",
   "funcao": "",
   "tipo": "decorativo|funcional|mecanico|artistico",
@@ -348,6 +353,11 @@ def generate_stl(scad_code):
 
 def run_pipeline(prompt):
     data = interpretation_agent(prompt)
+    
+    # 🔒 PROTEÇÃO: Se o pedido não for um objeto 3D real, corta o processo aqui para não gastar créditos!
+    if not data.get("valido", True):
+        raise Exception("Pedido inválido. Por favor, descreva um objeto físico para impressão 3D e não poemas ou conversas genéricas.")
+
     tokens = monetization_agent(data)
     engineering = engineering_agent(data)
 
