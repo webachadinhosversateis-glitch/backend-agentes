@@ -30,7 +30,6 @@ def nome_arquivo(prompt):
     base = re.sub(r"[^a-z0-9]+", "_", prompt.lower()).strip("_")
     return (base[:40] or "modelo") + ".stl"
 
-
 def limpar_json(texto):
     texto = texto.replace("```json", "").replace("```", "").strip()
     return texto
@@ -56,15 +55,15 @@ def originalizar(prompt):
 # ===============================
 # CAD ENGINE DETERMINÍSTICO
 # ===============================
-def scad_piramide():
-    return """
+def scad_piramide(largura=80, profundidade=80, altura=80):
+    return f"""
 polyhedron(
     points=[
         [0,0,0],
-        [80,0,0],
-        [80,80,0],
-        [0,80,0],
-        [40,40,80]
+        [{largura},0,0],
+        [{largura},{profundidade},0],
+        [0,{profundidade},0],
+        [{largura/2},{profundidade/2},{altura}]
     ],
     faces=[
         [0,1,2,3],
@@ -75,7 +74,6 @@ polyhedron(
     ]
 );
 """
-
 
 def scad_suporte_celular():
     return """
@@ -103,7 +101,6 @@ union() {
 }
 """
 
-
 def scad_organizador():
     return """
 difference() {
@@ -117,7 +114,6 @@ difference() {
 }
 """
 
-
 def scad_chaveiro():
     return """
 difference() {
@@ -130,7 +126,6 @@ difference() {
 }
 """
 
-
 def scad_borboleta():
     return """
 union() {
@@ -140,14 +135,12 @@ union() {
         translate([-42,22,2]) sphere(r=14, $fn=48);
         translate([-25,38,2]) sphere(r=10, $fn=48);
     }
-
     // asa esquerda inferior
     hull() {
         translate([-10,-4,2]) sphere(r=7, $fn=48);
         translate([-38,-25,2]) sphere(r=12, $fn=48);
         translate([-20,-36,2]) sphere(r=9, $fn=48);
     }
-
     // asa direita superior
     mirror([1,0,0])
     hull() {
@@ -155,7 +148,6 @@ union() {
         translate([-42,22,2]) sphere(r=14, $fn=48);
         translate([-25,38,2]) sphere(r=10, $fn=48);
     }
-
     // asa direita inferior
     mirror([1,0,0])
     hull() {
@@ -163,89 +155,69 @@ union() {
         translate([-38,-25,2]) sphere(r=12, $fn=48);
         translate([-20,-36,2]) sphere(r=9, $fn=48);
     }
-
     // corpo
     translate([0,0,2])
         scale([0.35,1.7,0.35])
         sphere(r=18, $fn=64);
-
     // cabeça
     translate([0,32,4])
         sphere(r=6, $fn=48);
-
     // antenas
     translate([-3,37,5])
         rotate([0,0,25])
         cylinder(h=20, r=1, $fn=16);
-
     translate([3,37,5])
         rotate([0,0,-25])
         cylinder(h=20, r=1, $fn=16);
 }
 """
 
-
 def scad_miniatura_anime():
     return """
 union() {
     // base
     cylinder(h=6, r=32, $fn=64);
-
     // pernas
     translate([-8,0,6]) cylinder(h=28, r=5, $fn=32);
     translate([8,0,6]) cylinder(h=28, r=5, $fn=32);
-
     // corpo
     translate([0,0,35])
         scale([0.8,0.55,1.25])
         sphere(r=18, $fn=64);
-
     // cabeça
     translate([0,0,68])
         sphere(r=15, $fn=64);
-
     // braços
     translate([-20,0,48])
         rotate([0,35,20])
         cylinder(h=32, r=4, $fn=32);
-
     translate([20,0,48])
         rotate([0,-35,-20])
         cylinder(h=32, r=4, $fn=32);
-
     // cabelo espetado simples
     translate([0,0,82])
         cylinder(h=18, r1=16, r2=0, $fn=6);
 }
 """
 
-
 # ===============================
 # CLASSIFICADOR LOCAL
 # ===============================
 def scad_deterministico(prompt):
     p = prompt.lower()
-
     if "pirâmide" in p or "piramide" in p:
         return scad_piramide()
-
     if "suporte" in p and "celular" in p:
         return scad_suporte_celular()
-
     if "organizador" in p or "porta caneta" in p:
         return scad_organizador()
-
     if "chaveiro" in p:
         return scad_chaveiro()
-
     if "borboleta" in p:
         return scad_borboleta()
-
     if "miniatura" in p or "anime" in p or "personagem" in p:
         return scad_miniatura_anime()
-
     return None
-
 
 # ===============================
 # IA PLANEJADORA CAD
@@ -275,12 +247,12 @@ Formato obrigatório:
   "precisa_base": true
 }
 
-Regras:
+Regras CRÍTICAS:
+- As chaves 'categoria' e 'forma_base' DEVEM conter exatamente uma das opções fornecidas.
+- Use APENAS letras minúsculas e NUNCA use acentos na forma_base (Ex: use "piramide" ao invés de "pirâmide").
 - Não use nomes oficiais de personagens.
-- Transforme personagens conhecidos em estilos originais.
-- Para suporte de celular, use categoria suporte.
 - Para miniatura/anime, use categoria miniatura.
-- Para pirâmide, use forma_base piramide.
+- Para pirâmide, use forma_base "piramide".
 """
 
     resp = client.chat.completions.create(
@@ -304,31 +276,16 @@ def scad_do_plano(plano):
         return scad_suporte_celular()
 
     categoria = plano.get("categoria", "geral")
-    forma = plano.get("forma_base", "cubo")
+    
+    # Anti-Falha: Limpa qualquer acento e joga para minúsculo para evitar o erro do cubo perfeito
+    forma = plano.get("forma_base", "cubo").lower().replace("â", "a").replace("í", "i").replace("á", "a")
 
     largura = float(plano.get("largura", 80))
     profundidade = float(plano.get("profundidade", 60))
     altura = float(plano.get("altura", 80))
 
     if forma == "piramide":
-        return f"""
-polyhedron(
-    points=[
-        [0,0,0],
-        [{largura},0,0],
-        [{largura},{profundidade},0],
-        [0,{profundidade},0],
-        [{largura/2},{profundidade/2},{altura}]
-    ],
-    faces=[
-        [0,1,2,3],
-        [0,1,4],
-        [1,2,4],
-        [2,3,4],
-        [3,0,4]
-    ]
-);
-"""
+        return scad_piramide(largura, profundidade, altura)
 
     if categoria == "suporte":
         return scad_suporte_celular()
@@ -357,16 +314,12 @@ polyhedron(
 def validar_scad(scad):
     if not scad or len(scad) < 20:
         return False
-
     if scad.count("(") != scad.count(")"):
         return False
-
     if scad.count("{") != scad.count("}"):
         return False
-
     if not any(x in scad for x in ["cube", "sphere", "cylinder", "polyhedron", "union", "hull"]):
         return False
-
     return True
 
 
@@ -375,7 +328,6 @@ def validar_scad(scad):
 # ===============================
 def gerar_stl(scad):
     name = str(uuid.uuid4())
-
     scad_file = f"/tmp/{name}.scad"
     stl_file = f"/tmp/{name}.stl"
 
@@ -402,19 +354,15 @@ def pipeline(prompt):
     prompt_original = prompt
     prompt = originalizar(prompt)
 
-    # 1. tenta geometria exata local
     scad = scad_deterministico(prompt)
 
-    # 2. se não achou, IA cria plano CAD
     if not scad:
         plano = plano_cad_ia(prompt)
         scad = scad_do_plano(plano)
 
-    # 3. valida
     if not validar_scad(scad):
         scad = scad_suporte_celular()
 
-    # 4. gera STL
     return gerar_stl(scad), nome_arquivo(prompt_original)
 
 
@@ -428,7 +376,6 @@ def home():
         "modo": "cad_engine_fusion_like",
         "ia": bool(client)
     }
-
 
 @app.post("/gerar")
 async def gerar(req: Request):
@@ -454,6 +401,30 @@ async def gerar(req: Request):
                 "detalhe": str(e)
             }
         )
+
+# NOVA ROTA: MELHORAR PROMPT
+@app.post("/melhorar-prompt")
+async def route_improve_prompt(req: Request):
+    if not client:
+        return JSONResponse({"erro": "A IA não está configurada."}, status_code=500)
+    try:
+        data = await req.json()
+        prompt_original = data.get("prompt", "")
+        
+        system_msg = "Você é um engenheiro especialista em modelagem 3D. O usuário vai te dar uma ideia. Reescreva essa ideia em 1 a 2 frases altamente detalhadas focando na geometria do objeto (formas, estabilidade, ângulos e recortes utilitários). Retorne APENAS o novo texto sugerido, sem explicações extras."
+        
+        resp = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": prompt_original}
+            ],
+            temperature=0.4
+        )
+        sugestao = resp.choices[0].message.content.replace("\"", "")
+        return JSONResponse({"sugestao": sugestao})
+    except Exception as e:
+        return JSONResponse({"erro": str(e)}, status_code=500)
 
 
 # ===============================
