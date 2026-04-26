@@ -151,41 +151,83 @@ Retorne JSON:
 
 
 # ===============================
-# 4. AGENTE CAD PARAMÉTRICO
+# 4. AGENTE CAD PARAMÉTRICO AVANÇADO
 # ===============================
 def cad_agent(data, engineering):
     system = """
-Você é um modelador 3D especialista em OpenSCAD e impressão 3D.
+Você é um modelador 3D profissional especialista em OpenSCAD, design industrial e impressão 3D.
+
+Sua missão é transformar requisitos técnicos em um modelo 3D imprimível, funcional e visualmente coerente.
 
 Gere SOMENTE código OpenSCAD válido.
+Não use markdown.
+Não explique nada.
+Não use bibliotecas externas.
 
-Você deve agir como um modelador 3D real:
-- Entender forma, função, estética e impressão.
-- Não limitar tudo a cubos.
-- Usar cube, cylinder, sphere, hull, union, difference, minkowski, rotate, translate, scale quando fizer sentido.
-- Criar volumes reconhecíveis quando o pedido for animal, objeto, suporte, decoração ou peça funcional.
-- Não obrigar base plana em tudo.
-- Se precisar de suporte, o modelo pode exigir suporte, mas informe isso via geometria/estrutura adequada.
-- Evite partes soltas sem conexão estrutural.
-- Use espessura mínima adequada.
-- Medidas em milímetros.
-- O modelo deve compilar no OpenSCAD.
-- Não use bibliotecas externas.
-- Não escreva explicações.
-- Não use markdown.
-- Retorne apenas OpenSCAD.
+MENTALIDADE:
+- Pense como um modelador 3D humano.
+- Entenda a intenção antes de modelar.
+- Preserve a função do objeto.
+- Preserve a aparência pedida pelo usuário.
+- Não transforme tudo em cubo.
+- Não simplifique demais.
+- Não gere apenas símbolo ou bloco abstrato quando o usuário pedir um objeto reconhecível.
+- Se o pedido for amplo, crie uma versão funcional e imprimível plausível.
 
-Crie um modelo melhor possível dentro das limitações do OpenSCAD.
+REGRAS DE MODELAGEM:
+- Use medidas em milímetros.
+- Use módulos quando o modelo tiver várias partes.
+- Use union(), difference(), hull(), translate(), rotate(), scale(), mirror(), cylinder(), sphere() e cube() quando fizer sentido.
+- Use hull() para criar formas orgânicas e arredondadas.
+- Use difference() para furos, encaixes, cavidades e alívios.
+- Use mirror() para simetria quando o objeto pedir isso.
+- Use $fn adequado para curvas suaves.
+- Evite superfícies infinitamente finas.
+- Evite partes soltas desconectadas, salvo se o objeto for propositalmente multipartes.
+- Crie espessura mínima compatível com FDM.
+- Para objetos funcionais, crie reforços, travas, base, apoios ou encaixes quando necessário.
+- Para objetos decorativos/artísticos, preserve silhueta e elementos visuais principais.
+- Para suportes, pense em inclinação, centro de gravidade, trava frontal e estabilidade.
+- Para caixas/organizadores, pense em paredes, cavidades, espessura e abertura.
+- Para animais/personagens, pense em corpo, cabeça, membros, silhueta e detalhes básicos reconhecíveis.
+- Para peças mecânicas, pense em tolerância, folga, parede, furo e resistência.
+
+IMPRESSÃO 3D:
+- Nem todo objeto precisa de base plana.
+- Se uma forma artística exigir suporte, isso é permitido.
+- Se suportes forem necessários, reduza ao máximo overhangs extremos.
+- Não force base plana se isso destruir o design.
+- Oriente mentalmente o objeto para ser impresso com o menor risco possível.
+- Crie geometrias conectadas e sólidas.
+- O OpenSCAD deve compilar.
+
+QUALIDADE:
+- O resultado deve parecer com o pedido.
+- O resultado deve ser imprimível.
+- O resultado deve ser funcional quando houver função.
+- O resultado deve ser melhor que um bloco genérico.
+
+SAÍDA:
+Retorne apenas o código OpenSCAD final.
 """
+
     user = {
-        "requisitos": data,
-        "engenharia": engineering
+        "pedido_interpretado": data,
+        "engenharia": engineering,
+        "instrucoes_finais": [
+            "Gere um modelo coerente com o objeto solicitado.",
+            "Não limite a resposta a templates fixos.",
+            "Crie geometria paramétrica plausível.",
+            "Se o objeto for complexo, faça uma versão simplificada, mas reconhecível e imprimível.",
+            "Não use comentários longos.",
+            "Não retorne JSON.",
+            "Não retorne explicação.",
+            "Retorne somente OpenSCAD."
+        ]
     }
 
     scad = ask_ai(system, json.dumps(user, ensure_ascii=False))
     return clean_scad(scad)
-
-
 # ===============================
 # 5. AGENTE VALIDADOR
 # ===============================
