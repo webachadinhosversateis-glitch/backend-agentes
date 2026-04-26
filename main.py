@@ -23,14 +23,19 @@ def engineering_agent(dados):
 
 
 # ===== AGENTE 3 (OPENSCAD -> STL) =====
-def cad_agent(dados):
-    scad_code = """
-    cube([80, 60, 100]);
-    """
+descricao = dados.get("descricao", "").lower()
 
-    nome = str(uuid.uuid4())
-    scad_file = f"/tmp/{nome}.scad"
-    stl_file = f"/tmp/{nome}.stl"
+if "inclinado" in descricao:
+    scad_code = "rotate([60,0,0]) cube([80,60,100]);"
+
+elif "largo" in descricao:
+    scad_code = "cube([120,80,100]);"
+
+elif "fino" in descricao:
+    scad_code = "cube([40,40,100]);"
+
+else:
+    scad_code = "cube([80,60,100]);"
 
     with open(scad_file, "w") as f:
         f.write(scad_code)
