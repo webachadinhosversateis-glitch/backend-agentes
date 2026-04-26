@@ -61,8 +61,7 @@ def generate_filename(data, prompt):
     base = base.replace("ú", "u")
 
     base = re.sub(r"[^a-z0-9]+", "_", base)
-    base = base.strip("_")
-    base = base[:50]
+    base = base.strip("_")[:50]
 
     if not base:
         base = "modelo_gerado"
@@ -71,6 +70,45 @@ def generate_filename(data, prompt):
 
 
 def fallback_scad(prompt):
+    prompt = prompt.lower()
+
+    if "borboleta" in prompt:
+        return """
+        $fn = 64;
+
+        module wing_left() {
+            hull() {
+                translate([-25, 0, 2]) scale([1.6, 1.0, 0.18]) sphere(r=18);
+                translate([-45, 22, 2]) scale([1.1, 0.8, 0.18]) sphere(r=12);
+                translate([-43, -22, 2]) scale([1.1, 0.8, 0.18]) sphere(r=12);
+            }
+        }
+
+        module wing_right() {
+            mirror([1, 0, 0]) wing_left();
+        }
+
+        union() {
+            wing_left();
+            wing_right();
+
+            translate([0, 0, 2])
+                scale([0.35, 1.6, 0.25])
+                sphere(r=18);
+
+            translate([0, 30, 4])
+                sphere(r=6);
+
+            translate([-5, 36, 5])
+                rotate([0, 0, 25])
+                cylinder(h=18, r=1.2);
+
+            translate([5, 36, 5])
+                rotate([0, 0, -25])
+                cylinder(h=18, r=1.2);
+        }
+        """
+
     return """
     union() {
         cube([80, 60, 5]);
@@ -83,16 +121,24 @@ def fallback_scad(prompt):
     """
 
 
-# ===============================
-# 1. AGENTE INTERPRETADOR
-# ===============================
 def interpretation_agent(prompt):
+    if not client:
+        return {
+            "objeto": prompt,
+            "funcao": "modelo 3D",
+            "tipo": "funcional" if "suporte" in prompt.lower() else "decorativo",
+            "estilo": "",
+            "partes_obrigatorias": [],
+            "dimensoes_estimadas_mm": {},
+            "material_recomendado": "PLA",
+            "precisao": "basico",
+            "complexidade": "baixo",
+            "observacoes": ["Fallback sem IA"]
+        }
+
     system = """
 Você é um agente interpretador para uma plataforma de modelagem 3D por IA.
-
-Sua função é transformar o pedido do usuário em requisitos técnicos claros.
-
-Retorne JSON com:
+Retorne JSON:
 {
   "objeto": "",
   "funcao": "",
@@ -105,21 +151,12 @@ Retorne JSON com:
   "complexidade": "baixo|medio|alto",
   "observacoes": []
 }
-
-Regras:
-- Não invente função mecânica se o usuário não pediu.
-- Se for suporte, encaixe, carga ou peça prática, trate como funcional.
-- Se for escultura, personagem, animal ou arte, trate como artístico/decorativo.
-- Se o pedido for vago, escolha uma interpretação plausível e imprimível.
-- O campo "objeto" deve ser curto e útil para virar nome de arquivo.
+O campo objeto deve ser curto e bom para nome de arquivo.
 """
     result = ask_ai(system, prompt, json_mode=True)
     return json.loads(result)
 
 
-# ===============================
-# 2. AGENTE MONETIZAÇÃO
-# ===============================
 def monetization_agent(data):
     base = 10
 
@@ -143,30 +180,28 @@ def monetization_agent(data):
     return base
 
 
-# ===============================
-# 3. AGENTE ENGENHARIA
-# ===============================
 def engineering_agent(data):
+    if not client:
+        return {
+            "espessura_minima_mm": 2.0,
+            "tolerancia_encaixe_mm": 0.3,
+            "precisa_suporte": False,
+            "tipo_suporte": "",
+            "orientacao_impressao": "base na mesa",
+            "riscos": [],
+            "correcoes_necessarias": [],
+            "criterios_validacao": []
+        }
+
     system = """
-Você é um engenheiro mecânico especialista em impressão 3D FDM.
-
-Analise os requisitos do objeto e defina como ele deve ser modelado para funcionar.
-
-Importante:
-- Nem todo objeto precisa de base plana.
-- Alguns modelos podem ter partes suspensas, desde que a orientação de impressão ou suportes sejam previstos.
-- Não force base plana se isso destruir o design.
-- Para peça funcional, priorize resistência, encaixe e estabilidade.
-- Para peça artística, preserve forma visual sem tornar impossível de imprimir.
-- Para suporte de celular, pense em centro de gravidade, trava frontal, encosto, ângulo e base.
-- Para animais/decorativos, pense em silhueta reconhecível, corpo, cabeça, membros, asas, olhos ou detalhes simples.
-- Para caixas/organizadores, pense em espessura de parede, cavidade, abertura e cantos arredondados.
-
+Você é engenheiro especialista em impressão 3D FDM.
+Analise função, resistência, orientação, suportes e imprimibilidade.
+Nem todo objeto precisa de base plana. Não destrua o design.
 Retorne JSON:
 {
   "espessura_minima_mm": 2.0,
   "tolerancia_encaixe_mm": 0.3,
-  "precisa_suporte": true/false,
+  "precisa_suporte": true,
   "tipo_suporte": "",
   "orientacao_impressao": "",
   "riscos": [],
@@ -178,144 +213,75 @@ Retorne JSON:
     return json.loads(result)
 
 
-# ===============================
-# 4. AGENTE CAD PARAMÉTRICO AVANÇADO
-# ===============================
 def cad_agent(data, engineering):
+    if not client:
+        return fallback_scad(data.get("objeto", ""))
+
     system = """
 Você é um modelador 3D profissional especialista em OpenSCAD, design industrial e impressão 3D.
 
-Sua missão é transformar requisitos técnicos em um modelo 3D imprimível, funcional e visualmente coerente.
-
 Gere SOMENTE código OpenSCAD válido.
-Não use markdown.
-Não explique nada.
-Não use bibliotecas externas.
+Não use markdown. Não explique. Não use bibliotecas externas.
 
-MENTALIDADE:
-- Pense como um modelador 3D humano.
-- Entenda a intenção antes de modelar.
-- Preserve a função do objeto.
-- Preserve a aparência pedida pelo usuário.
-- Não transforme tudo em cubo.
-- Não simplifique demais.
-- Não gere apenas símbolo ou bloco abstrato quando o usuário pedir um objeto reconhecível.
-- Se o pedido for amplo, crie uma versão funcional e imprimível plausível.
-
-REGRAS DE MODELAGEM:
-- Use medidas em milímetros.
-- Use módulos quando o modelo tiver várias partes.
-- Use union(), difference(), hull(), translate(), rotate(), scale(), mirror(), cylinder(), sphere() e cube() quando fizer sentido.
-- Use hull() para criar formas orgânicas e arredondadas.
-- Use difference() para furos, encaixes, cavidades e alívios.
-- Use mirror() para simetria quando o objeto pedir isso.
-- Use $fn adequado para curvas suaves.
-- Evite superfícies infinitamente finas.
-- Evite partes soltas desconectadas, salvo se o objeto for propositalmente multipartes.
-- Crie espessura mínima compatível com FDM.
-- Para objetos funcionais, crie reforços, travas, base, apoios ou encaixes quando necessário.
-- Para objetos decorativos/artísticos, preserve silhueta e elementos visuais principais.
-- Para suportes, pense em inclinação, centro de gravidade, trava frontal e estabilidade.
-- Para caixas/organizadores, pense em paredes, cavidades, espessura e abertura.
-- Para animais/personagens, pense em corpo, cabeça, membros, silhueta e detalhes básicos reconhecíveis.
-- Para peças mecânicas, pense em tolerância, folga, parede, furo e resistência.
-
-IMPRESSÃO 3D:
-- Nem todo objeto precisa de base plana.
-- Se uma forma artística exigir suporte, isso é permitido.
-- Se suportes forem necessários, reduza ao máximo overhangs extremos.
-- Não force base plana se isso destruir o design.
-- Oriente mentalmente o objeto para ser impresso com o menor risco possível.
-- Crie geometrias conectadas e sólidas.
-- O OpenSCAD deve compilar.
-
-QUALIDADE:
-- O resultado deve parecer com o pedido.
-- O resultado deve ser imprimível.
-- O resultado deve ser funcional quando houver função.
-- O resultado deve ser melhor que um bloco genérico.
-
-SAÍDA:
-Retorne apenas o código OpenSCAD final.
+Pense como modelador humano:
+- preserve forma, função e aparência;
+- não transforme tudo em cubo;
+- crie silhueta reconhecível;
+- use módulos;
+- use union(), difference(), hull(), translate(), rotate(), scale(), mirror(), cylinder(), sphere(), cube();
+- use hull() para curvas orgânicas;
+- use difference() para furos, encaixes e cavidades;
+- use mirror() para simetria;
+- use $fn para curvas suaves;
+- evite partes soltas;
+- use espessura compatível com FDM;
+- se for funcional, crie reforços, travas, apoios ou encaixes;
+- se for suporte de celular, crie encosto inclinado, trava frontal, estabilidade e espaço para cabo quando fizer sentido;
+- nem todo objeto precisa de base plana;
+- se precisar de suporte no fatiador, tudo bem, mas reduza overhang extremo;
+- o OpenSCAD deve compilar.
 """
     user = {
         "pedido_interpretado": data,
         "engenharia": engineering,
-        "instrucoes_finais": [
-            "Gere um modelo coerente com o objeto solicitado.",
-            "Não limite a resposta a templates fixos.",
-            "Crie geometria paramétrica plausível.",
-            "Se o objeto for complexo, faça uma versão simplificada, mas reconhecível e imprimível.",
-            "Não use comentários longos.",
-            "Não retorne JSON.",
-            "Não retorne explicação.",
-            "Retorne somente OpenSCAD."
-        ]
+        "objetivo": "modelo reconhecível, imprimível e funcional quando houver função"
     }
 
     scad = ask_ai(system, json.dumps(user, ensure_ascii=False))
     return clean_scad(scad)
 
 
-# ===============================
-# 5. AGENTE VALIDADOR
-# ===============================
 def validation_agent(scad_code, data, engineering):
+    if not client:
+        return {"valido": True, "problemas": [], "melhorias": [], "parece_atender_pedido": True, "motivo": "Fallback"}
+
     system = """
-Você é um validador técnico de modelos OpenSCAD para impressão 3D.
-
-Analise o código e os requisitos.
-
+Você é validador técnico de OpenSCAD para impressão 3D.
 Retorne JSON:
 {
-  "valido": true/false,
+  "valido": true,
   "problemas": [],
   "melhorias": [],
-  "parece_atender_pedido": true/false,
+  "parece_atender_pedido": true,
   "motivo": ""
 }
-
-Critérios:
-- Compilação provável no OpenSCAD.
-- Correspondência com o pedido.
-- Peças conectadas quando necessário.
-- Espessura mínima.
-- Orientação de impressão.
-- Necessidade de suporte aceitável.
-- Não reprovar apenas por não ter base plana.
-- Reprove se o código parecer genérico demais para o pedido.
-- Reprove se um pedido artístico virar só cubos simples sem silhueta reconhecível.
+Não reprove apenas por não ter base plana.
+Reprove se for genérico demais ou não parecer atender ao pedido.
 """
-    payload = {
-        "scad": scad_code,
-        "requisitos": data,
-        "engenharia": engineering
-    }
-
+    payload = {"scad": scad_code, "requisitos": data, "engenharia": engineering}
     result = ask_ai(system, json.dumps(payload, ensure_ascii=False), json_mode=True)
     return json.loads(result)
 
 
-# ===============================
-# 6. AGENTE CORRETOR
-# ===============================
 def correction_agent(scad_code, data, engineering, validation, compile_error=None):
+    if not client:
+        return fallback_scad(data.get("objeto", ""))
+
     system = """
-Você é um agente corretor de OpenSCAD.
-
-Corrija o código mantendo o pedido original.
-
-Regras:
-- Retorne SOMENTE código OpenSCAD.
-- Não use markdown.
-- Corrija erro de sintaxe, geometria ruim, partes soltas e baixa correspondência visual.
-- Não simplifique demais.
-- Não transforme tudo em cubo.
-- Preserve a intenção do usuário.
-- Se houver erro de compilação, corrija.
-- Se o validador disse que não parece atender ao pedido, aumente a correspondência visual.
-- Se for suporte, mantenha funcionalidade real.
-- Se for objeto artístico, melhore silhueta e detalhes reconhecíveis.
+Você é corretor de OpenSCAD.
+Retorne SOMENTE código OpenSCAD.
+Corrija sintaxe, partes soltas, baixa correspondência visual e erro de compilação.
+Não simplifique para cubo. Preserve intenção original.
 """
     payload = {
         "scad_atual": scad_code,
@@ -329,15 +295,20 @@ Regras:
     return clean_scad(corrected)
 
 
-# ===============================
-# 7. AGENTE SLICER
-# ===============================
 def slicer_agent(data, engineering):
+    if not client:
+        return {
+            "material": "PLA",
+            "altura_camada": "0.20 mm",
+            "infill": "15%",
+            "paredes": "3 loops",
+            "suportes": "se necessário",
+            "orientacao": "base na mesa",
+            "observacoes": []
+        }
+
     system = """
 Você é especialista em Bambu Studio, Cura e PrusaSlicer.
-
-Gere configurações recomendadas de impressão.
-
 Retorne JSON:
 {
   "material": "",
@@ -348,26 +319,12 @@ Retorne JSON:
   "orientacao": "",
   "observacoes": []
 }
-
-Leve em conta:
-- Tipo do objeto.
-- Se é funcional ou decorativo.
-- Se precisa de suporte.
-- Orientação de impressão recomendada.
-- Material recomendado.
 """
-    payload = {
-        "requisitos": data,
-        "engenharia": engineering
-    }
-
+    payload = {"requisitos": data, "engenharia": engineering}
     result = ask_ai(system, json.dumps(payload, ensure_ascii=False), json_mode=True)
     return json.loads(result)
 
 
-# ===============================
-# GERAR STL REAL
-# ===============================
 def generate_stl(scad_code):
     name = str(uuid.uuid4())
     scad_file = f"/tmp/{name}.scad"
@@ -389,38 +346,7 @@ def generate_stl(scad_code):
         return f.read()
 
 
-def fallback_pipeline(prompt):
-    data = {
-        "objeto": prompt,
-        "tipo": "funcional",
-        "complexidade": "baixo",
-        "precisao": "basico"
-    }
-    scad = fallback_scad(prompt)
-    stl = generate_stl(scad)
-    filename = generate_filename(data, prompt)
-
-    metadata = {
-        "tokens": 0,
-        "objeto": data["objeto"],
-        "tipo": data["tipo"],
-        "complexidade": data["complexidade"],
-        "precisao": data["precisao"],
-        "slicer": {},
-        "filename": filename,
-        "ia_ativa": False
-    }
-
-    return stl, metadata, filename
-
-
-# ===============================
-# PIPELINE COMPLETO
-# ===============================
 def run_pipeline(prompt):
-    if not client:
-        return fallback_pipeline(prompt)
-
     data = interpretation_agent(prompt)
     tokens = monetization_agent(data)
     engineering = engineering_agent(data)
@@ -448,15 +374,12 @@ def run_pipeline(prompt):
         "precisao": data.get("precisao", ""),
         "slicer": slicer,
         "filename": filename,
-        "ia_ativa": True
+        "ia_ativa": bool(client)
     }
 
     return stl, metadata, filename
 
 
-# ===============================
-# ROTAS
-# ===============================
 @app.get("/")
 def home():
     return {
@@ -516,12 +439,8 @@ async def gerar(req: Request):
         )
 
 
-# ===============================
-# START
-# ===============================
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(
         app,
         host="0.0.0.0",
