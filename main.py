@@ -1,44 +1,39 @@
 from fastapi import FastAPI, Request
+import os
 
 app = FastAPI()
-
-# ===== AGENTES =====
 
 def interpreter_agent(prompt):
     return {
         "tipo": "funcional",
-        "dimensoes": "automático",
-        "descricao": prompt
+        "descricao": prompt,
+        "dimensoes": "automatico"
     }
 
-def engineering_agent(data):
-    data["validado"] = True
-    return data
+def engineering_agent(dados):
+    dados["validado"] = True
+    return dados
 
-def cad_agent(data):
-    scad = f"""
+def cad_agent(dados):
+    scad = """
     cube([80,60,100]);
     """
     return {"scad_code": scad}
 
-def validator_agent(model):
-    return {"valid": True, "errors": []}
-
-# ===== ORQUESTRADOR =====
+def validator_agent(modelo):
+    return {"valido": True, "erros": []}
 
 def run_pipeline(prompt):
-    step1 = interpreter_agent(prompt)
-    step2 = engineering_agent(step1)
-    step3 = cad_agent(step2)
-    step4 = validator_agent(step3)
+    passo1 = interpreter_agent(prompt)
+    passo2 = engineering_agent(passo1)
+    passo3 = cad_agent(passo2)
+    passo4 = validator_agent(passo3)
 
     return {
-        "input": prompt,
-        "modelo": step3,
-        "validacao": step4
+        "entrada": prompt,
+        "modelo": passo3,
+        "validacao": passo4
     }
-
-# ===== ROTAS =====
 
 @app.get("/")
 def home():
@@ -50,9 +45,10 @@ def agente():
 
 @app.post("/gerar")
 async def gerar(req: Request):
-    body = await req.json()
-    prompt = body.get("prompt")
+    corpo = await req.json()
+    prompt = corpo.get("prompt")
+    return run_pipeline(prompt)
 
-    result = run_pipeline(prompt)
-
-    return result
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
