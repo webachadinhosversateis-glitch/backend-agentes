@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 import os
 import subprocess
 import uuid
@@ -7,7 +7,7 @@ import uuid
 app = FastAPI()
 
 
-# ===== AGENTE 1: INTERPRETAÇÃO =====
+# ===== AGENTE 1 =====
 def interpreter_agent(prompt):
     return {
         "tipo": "funcional",
@@ -16,13 +16,13 @@ def interpreter_agent(prompt):
     }
 
 
-# ===== AGENTE 2: ENGENHARIA =====
+# ===== AGENTE 2 =====
 def engineering_agent(dados):
     dados["validado"] = True
     return dados
 
 
-# ===== AGENTE 3: CAD / OPENSCAD =====
+# ===== AGENTE 3 (OPENSCAD -> STL) =====
 def cad_agent(dados):
     scad_code = """
     cube([80, 60, 100]);
@@ -32,21 +32,21 @@ def cad_agent(dados):
     scad_file = f"/tmp/{nome}.scad"
     stl_file = f"/tmp/{nome}.stl"
 
-    with open(scad_file, "w") as arquivo:
-        arquivo.write(scad_code)
+    with open(scad_file, "w") as f:
+        f.write(scad_code)
 
     subprocess.run(
         ["openscad", "-o", stl_file, scad_file],
         check=True
     )
 
-    return {
-        "scad_code": scad_code,
-        "arquivo_stl": stl_file
-    }
+    with open(stl_file, "rb") as f:
+        stl_bytes = f.read()
+
+    return stl_bytes
 
 
-# ===== AGENTE 4: VALIDADOR =====
+# ===== AGENTE 4 =====
 def validator_agent(modelo):
     return {
         "valido": True,
@@ -54,47 +54,45 @@ def validator_agent(modelo):
     }
 
 
-# ===== ORQUESTRADOR =====
+# ===== PIPELINE =====
 def run_pipeline(prompt):
     passo1 = interpreter_agent(prompt)
     passo2 = engineering_agent(passo1)
     passo3 = cad_agent(passo2)
     passo4 = validator_agent(passo3)
 
-    return {
-        "entrada": prompt,
-        "modelo": passo3,
-        "validacao": passo4
-    }
+    return passo3  # aqui retorna o STL direto
 
 
 # ===== ROTAS =====
 @app.get("/")
 def home():
-    return {"status": "online", "mensagem": "backend rodando"}
+    return {"status": "online"}
 
 
 @app.get("/agente")
 def agente():
-    return {"msg": "agente funcionando"}
+    return {"msg": "funcionando"}
 
 
+# 🚀 ROTA PRINCIPAL DE DOWNLOAD
 @app.post("/gerar")
 async def gerar(req: Request):
     corpo = await req.json()
     prompt = corpo.get("prompt", "modelo simples")
 
-    resultado = run_pipeline(prompt)
-    arquivo_stl = resultado["modelo"]["arquivo_stl"]
+    stl = run_pipeline(prompt)
 
-    return FileResponse(
-        arquivo_stl,
-        media_type="application/octet-stream",
-        filename="modelo_gerado.stl"
+    return Response(
+        content=stl,
+        media_type="application/sla",
+        headers={
+            "Content-Disposition": "attachment; filename=modelo.stl"
+        }
     )
 
 
-# ===== START LOCAL / RAILWAY =====
+# ===== START =====
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
