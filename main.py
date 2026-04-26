@@ -1,17 +1,10 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-import subprocess, uuid, os, re
+import os, time, requests, re
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-client = None
-if OPENAI_API_KEY:
-    try:
-        from openai import OpenAI
-        client = OpenAI(api_key=OPENAI_API_KEY)
-    except:
-        client = None
+# A SUA CHAVE DA TRIPO ESTÁ AQUI
+TRIPO_API_KEY = "tsk_yM5te_C_T33v2KfSuCX_IdMDELB2hKzdyL5RnX_aJp5"
 
 app = FastAPI()
 app.add_middleware(
@@ -22,125 +15,116 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def ask_ai(system, user, json_mode=False):
-    if not client:
-        raise Exception("API Key não configurada no Railway.")
-    resp = client.chat.completions.create(
-        model="gpt-4o",
-        response_format={"type": "json_object"} if json_mode else None,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user}
-        ],
-        temperature=0.2
-    )
-    return resp.choices[0].message.content
-
 # ==========================================
-# AGENTE 1: INTERPRETADOR (Projetista)
+# TRIPO 3D NATIVE INTEGRATION
 # ==========================================
-def agent_interpreter(user_prompt):
-    print("🤖 Agente 1: Projetando as formas...")
-    system = "Você é um Engenheiro Chefe 3D. Receba o pedido do usuário e converta em instruções matemáticas cruas para um programador OpenSCAD. Diga exatamente quais formas primitivas (cubos, esferas, cilindros, polígonos) usar e quais são os tamanhos em milímetros. Foque na estabilidade e em evitar partes flutuantes."
-    return ask_ai(system, user_prompt, json_mode=False)
-
-# ==========================================
-# AGENTE 2: PROGRAMADOR (Coder OpenSCAD)
-# ==========================================
-def agent_scad_coder(math_instructions):
-    print("🤖 Agente 2: Escrevendo o código...")
-    system = """Você é um programador OpenSCAD rigoroso.
-Regras Críticas:
-1. Retorne APENAS o código OpenSCAD puro. Sem formatação Markdown. Sem textos explicativos.
-2. NUNCA use módulos que não existem. Use apenas primitivas básicas (cube, sphere, cylinder, polyhedron).
-3. Para objetos não-geométricos (como facas, chaves, espadas), combine `polyhedron` (para as lâminas) e `cylinder` (para os cabos).
-4. Garanta que todas as partes estão coladas usando `translate()`. Não deixe peças voando!"""
-    code = ask_ai(system, math_instructions, json_mode=False)
-    # Limpa a formatação caso a IA teime em usar markdown
-    code = re.sub(r"```[a-z]*", "", code).replace("```", "").strip()
-    return code
-
-# ==========================================
-# AGENTE 3: CORRETOR DE BUGS (Debugger)
-# ==========================================
-def agent_error_fixer(bad_code, error_log):
-    print("🤖 Agente 3: Encontrei um erro. Corrigindo...")
-    system = "Você é um depurador OpenSCAD sênior. O código abaixo tentou compilar mas deu Erro de Sintaxe (Syntax Error). Conserte o código, garanta que chaves e parênteses fecham corretamente. Retorne APENAS o código OpenSCAD corrigido."
-    prompt = f"CÓDIGO COM ERRO:\n{bad_code}\n\nERRO DO COMPILADOR:\n{error_log}"
-    code = ask_ai(system, prompt, json_mode=False)
-    return re.sub(r"```[a-z]*", "", code).replace("```", "").strip()
-
-# ==========================================
-# MOTOR DE COMPILAÇÃO
-# ==========================================
-def compile_scad(scad_code):
-    name = str(uuid.uuid4())
-    scad_file = f"/tmp/{name}.scad"
-    stl_file = f"/tmp/{name}.stl"
-
-    with open(scad_file, "w", encoding="utf-8") as f:
-        f.write(scad_code)
-
-    result = subprocess.run(["openscad", "-o", stl_file, scad_file], capture_output=True, text=True)
+def generate_tripo_model(prompt):
+    headers = {
+        "Authorization": f"Bearer {TRIPO_API_KEY}",
+        "Content-Type": "application/json"
+    }
     
-    if result.returncode != 0:
-        return False, result.stderr
+    # Passo 1: Enviar o pedido para a Tripo3D
+    payload = {
+        "type": "text_to_model",
+        "prompt": prompt
+    }
+    
+    print(f"🚀 Enviando prompt para Tripo3D: '{prompt}'")
+    create_res = requests.post("https://api.tripo3d.ai/v2/openapi/task", headers=headers, json=payload)
+    
+    if create_res.status_code != 200:
+        raise Exception(f"Erro ao iniciar tarefa na Tripo: {create_res.text}")
         
-    if not os.path.exists(stl_file) or os.path.getsize(stl_file) == 0:
-        return False, "Erro: O arquivo STL gerado está vazio (A matemática do modelo criou um objeto vazio ou invisível)."
-
-    with open(stl_file, "rb") as f:
-        data = f.read()
-    return True, data
-
-# ==========================================
-# PIPELINE DA GERAÇÃO MULTI-AGENTES
-# ==========================================
-def run_agentic_pipeline(user_prompt):
-    math_instructions = agent_interpreter(user_prompt)
-    scad_code = agent_scad_coder(math_instructions)
+    task_id = create_res.json().get("data", {}).get("task_id")
+    if not task_id:
+        raise Exception("A API da Tripo não retornou um ID de tarefa.")
+        
+    print(f"⏳ Tarefa {task_id} criada. Aguardando a IA esculpir a malha...")
     
-    max_retries = 3
-    for tentativa in range(max_retries):
-        success, result = compile_scad(scad_code)
-        if success:
-            return result # STL gerado com sucesso
-        else:
-            error_log = result
-            print(f"Erro na tentativa {tentativa + 1}. Chamando o Agente 3...")
-            if tentativa < max_retries - 1:
-                scad_code = agent_error_fixer(scad_code, error_log)
-            else:
-                raise Exception(f"A equipe de Agentes falhou após {max_retries} tentativas. Último erro OpenSCAD: {error_log}")
+    # Passo 2: Polling - Ficar checando a cada 2 segundos se a IA já terminou
+    model_url = None
+    for attempt in range(60): # Espera no máximo 120 segundos
+        time.sleep(2)
+        poll_res = requests.get(f"https://api.tripo3d.ai/v2/openapi/task/{task_id}", headers=headers)
+        
+        if poll_res.status_code != 200:
+            continue
+            
+        data = poll_res.json().get("data", {})
+        status = data.get("status")
+        
+        if status == "success":
+            model_url = data.get("result", {}).get("model", {}).get("url")
+            break
+        elif status in ["failed", "cancelled", "unknown"]:
+            raise Exception("A geração do modelo falhou nos servidores da Tripo3D.")
+            
+    if not model_url:
+        raise Exception("Tempo limite esgotado. A Tripo demorou muito para responder.")
+        
+    # Passo 3: Fazer o download do arquivo .glb final
+    print(f"✅ Modelo pronto! Baixando malha colorida...")
+    glb_response = requests.get(model_url)
+    if glb_response.status_code != 200:
+        raise Exception("Erro ao baixar o arquivo GLB da Tripo3D.")
+        
+    return glb_response.content
 
 # ==========================================
 # ROTAS DO FASTAPI
 # ==========================================
 @app.get("/")
 def home():
-    return {"status": "online", "modo": "multi_agent_zero_shot"}
+    return {"status": "online", "modo": "tripo3d_genai_native"}
 
 @app.post("/gerar")
 async def gerar(req: Request):
     try:
         body = await req.json()
         prompt = body.get("prompt", "")
+        if not prompt:
+            return JSONResponse(status_code=400, content={"erro": "Você precisa escrever algo."})
         
-        stl_data = run_agentic_pipeline(prompt)
+        glb_data = generate_tripo_model(prompt)
         
-        filename = re.sub(r"[^a-z0-9]+", "_", prompt.lower()).strip("_")[:30] + ".stl"
-        return Response(content=stl_data, media_type="application/octet-stream", headers={"Content-Disposition": f"attachment; filename={filename}"})
+        filename = re.sub(r"[^a-z0-9]+", "_", prompt.lower()).strip("_")[:30] + ".glb"
+        return Response(
+            content=glb_data, 
+            media_type="model/gltf-binary", 
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
     except Exception as e:
+        print("Erro Servidor:", str(e))
         return JSONResponse(status_code=500, content={"erro": str(e)})
+
 
 @app.post("/melhorar-prompt")
 async def route_improve_prompt(req: Request):
     try:
         data = await req.json()
         prompt_original = data.get("prompt", "")
-        system_msg = "Você é um engenheiro de modelagem 3D. Reescreva a ideia do usuário em 1 ou 2 frases extremamente detalhadas, focando nas dimensões métricas, simetria e geometria."
-        sugestao = ask_ai(system_msg, prompt_original)
-        return JSONResponse({"sugestao": sugestao})
+        
+        # A Tripo3D gera modelos BEM melhores se o prompt estiver em inglês e for bem descritivo
+        openai_key = os.getenv("OPENAI_API_KEY")
+        if openai_key:
+            from openai import OpenAI
+            client = OpenAI(api_key=openai_key)
+            system_msg = "Você é um tradutor especialista em Midjourney/Tripo3D. Pegue o pedido do usuário e transforme num prompt em INGLÊS focado em textura, estilo e material (ex: 'A highly detailed 3D model of a...', '8k resolution', 'physically based rendering'). Retorne APENAS o prompt em inglês."
+            resp = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": prompt_original}
+                ],
+                temperature=0.4
+            )
+            sugestao = resp.choices[0].message.content.replace("\"", "")
+            return JSONResponse({"sugestao": sugestao})
+        else:
+            sugestao = f"A highly detailed 3D model of {prompt_original}, 8k resolution, realistic textures"
+            return JSONResponse({"sugestao": sugestao})
+            
     except Exception as e:
         return JSONResponse(status_code=500, content={"erro": str(e)})
 
