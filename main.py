@@ -8,7 +8,7 @@ import re
 import json
 
 # ===============================
-# CONFIG OPENAI (AGORA NÃO QUEBRA)
+# OPENAI (SEM QUEBRAR)
 # ===============================
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
@@ -17,6 +17,9 @@ if OPENAI_API_KEY:
     from openai import OpenAI
     client = OpenAI(api_key=OPENAI_API_KEY)
 
+# ===============================
+# APP
+# ===============================
 app = FastAPI()
 
 app.add_middleware(
@@ -28,76 +31,48 @@ app.add_middleware(
 )
 
 # ===============================
-# HELPERS
+# UTIL
 # ===============================
-def clean_scad(text: str) -> str:
-    text = re.sub(r"```.*?", "", text)
-    return text.strip()
+def clean_scad(text):
+    return re.sub(r"```.*?", "", text).strip()
 
-def filename_from_prompt(prompt: str) -> str:
-    base = re.sub(r"[^a-z0-9]+", "_", prompt.lower()).strip("_")[:40]
-    return f"{base or 'modelo'}.stl"
+def gerar_nome(prompt):
+    base = re.sub(r"[^a-z0-9]+", "_", prompt.lower()).strip("_")
+    return (base[:40] or "modelo") + ".stl"
 
 # ===============================
 # ORIGINALIZADOR (ANTI CÓPIA)
 # ===============================
-def originalizer(prompt: str) -> str:
+def originalizer(prompt):
     swaps = {
-        "naruto": "ninja estilo anime",
-        "goku": "guerreiro de cabelo espetado"
+        "naruto": "ninja anime",
+        "goku": "guerreiro anime cabelo espetado"
     }
     for k, v in swaps.items():
         prompt = prompt.lower().replace(k, v)
     return prompt
 
 # ===============================
-# CLASSIFICADOR
+# LIBRARY (INTELIGÊNCIA BASE)
 # ===============================
-def classify(prompt: str):
-    if "suporte" in prompt:
-        return "suporte"
-    if "miniatura" in prompt or "anime" in prompt:
-        return "miniatura"
-    return "geral"
-
-# ===============================
-# IA (CAD INTELIGENTE)
-# ===============================
-def cad_agent(prompt: str):
-
-    if not client:
-        return fallback_scad(prompt)
-
+def search_library(prompt):
     try:
-        system = """
-Você é um modelador 3D profissional.
+        with open("library.json") as f:
+            data = json.load(f)
 
-Regras:
-- Retorne apenas código OpenSCAD
-- Use union, hull, difference
-- Modelo deve ser bonito e funcional
-- Nunca retornar cubo simples
-- Sempre criar forma reconhecível
-"""
+        for item in data:
+            for tag in item["tags"]:
+                if tag in prompt.lower():
+                    return item
 
-        resp = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.4
-        )
-
-        return clean_scad(resp.choices[0].message.content)
-
+        return None
     except:
-        return fallback_scad(prompt)
+        return None
 
 # ===============================
 # FALLBACK (NUNCA QUEBRA)
 # ===============================
-def fallback_scad(prompt: str):
+def fallback_scad(prompt):
 
     if "borboleta" in prompt:
         return """
@@ -129,16 +104,50 @@ def fallback_scad(prompt: str):
     return "sphere(30);"
 
 # ===============================
+# CAD AGENT (IA)
+# ===============================
+def cad_agent(prompt):
+
+    if not client:
+        return fallback_scad(prompt)
+
+    try:
+        system = """
+Você é um modelador 3D profissional.
+
+Regras:
+- Retorne SOMENTE código OpenSCAD
+- Use union(), difference(), hull()
+- Gere formas bonitas e funcionais
+- Evite formas simples como cubo puro
+- Use proporções reais
+"""
+
+        resp = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.4
+        )
+
+        return clean_scad(resp.choices[0].message.content)
+
+    except:
+        return fallback_scad(prompt)
+
+# ===============================
 # VALIDAÇÃO
 # ===============================
-def validate_scad(scad: str):
-    if len(scad) < 10:
+def validate_scad(scad):
+    if not scad or len(scad) < 10:
         raise Exception("SCAD inválido")
 
 # ===============================
 # GERAR STL
 # ===============================
-def generate_stl(scad_code: str):
+def generate_stl(scad):
 
     name = str(uuid.uuid4())
 
@@ -146,7 +155,7 @@ def generate_stl(scad_code: str):
     stl_file = f"/tmp/{name}.stl"
 
     with open(scad_file, "w") as f:
-        f.write(scad_code)
+        f.write(scad)
 
     result = subprocess.run(
         ["openscad", "-o", stl_file, scad_file],
@@ -163,9 +172,14 @@ def generate_stl(scad_code: str):
 # ===============================
 # PIPELINE
 # ===============================
-def pipeline(prompt: str):
+def pipeline(prompt):
 
     prompt = originalizer(prompt)
+
+    ref = search_library(prompt)
+
+    if ref:
+        prompt = f"{prompt} baseado em {ref['nome']}"
 
     scad = cad_agent(prompt)
 
@@ -178,7 +192,7 @@ def pipeline(prompt: str):
 # ===============================
 @app.get("/")
 def home():
-    return {"status": "online", "mode": "pro"}
+    return {"status": "online", "modo": "pro"}
 
 @app.post("/gerar")
 async def gerar(req: Request):
@@ -188,13 +202,13 @@ async def gerar(req: Request):
 
         stl = pipeline(prompt)
 
-        filename = filename_from_prompt(prompt)
+        nome = gerar_nome(prompt)
 
         return Response(
             content=stl,
             media_type="application/octet-stream",
             headers={
-                "Content-Disposition": f"attachment; filename={filename}"
+                "Content-Disposition": f"attachment; filename={nome}"
             }
         )
 
