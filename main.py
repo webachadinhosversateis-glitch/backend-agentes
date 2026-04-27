@@ -73,8 +73,6 @@ async def gerar(req: Request):
         if not prompt:
             return JSONResponse(status_code=400, content={"erro": "Prompt vazio."})
         
-        # A Mágica Acontece Aqui: Em vez de ficar preso esperando 120 segundos,
-        # o servidor devolve o Ticket da Tarefa instantaneamente!
         task_id = await create_tripo_task(prompt=prompt)
         return JSONResponse({"task_id": task_id})
     except Exception as e:
@@ -95,7 +93,6 @@ async def gerar_imagem(req: Request):
     except Exception as e:
         return JSONResponse(status_code=500, content={"erro": str(e)})
 
-# Nova rota para o seu site ficar perguntando: "Ei, o ID X já terminou?"
 @app.get("/status/{task_id}")
 async def check_status(task_id: str):
     url = f"https://api.tripo3d.ai/v2/openapi/task/{task_id}"
@@ -110,10 +107,36 @@ async def check_status(task_id: str):
             if status == "success":
                 result = data.get("result", {})
                 model_url = result.get("pbr_model", {}).get("url") or result.get("model", {}).get("url")
-                # Quando terminar, entrega o Link do arquivo direto da Tripo3D
                 return JSONResponse({"status": "success", "model_url": model_url})
             else:
                 return JSONResponse({"status": status})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"erro": str(e)})
+
+# O Proxy Mágico: Pega o arquivo da Tripo e passa pro navegador sem o erro do CORS!
+@app.get("/download/{task_id}")
+async def download_model(task_id: str):
+    url = f"https://api.tripo3d.ai/v2/openapi/task/{task_id}"
+    headers = {"Authorization": f"Bearer {TRIPO_API_KEY}"}
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    
+    try:
+        with urllib.request.urlopen(req) as response:
+            data = json.loads(response.read().decode("utf-8")).get("data", {})
+            status = data.get("status")
+            
+            if status == "success":
+                result = data.get("result", {})
+                model_url = result.get("pbr_model", {}).get("url") or result.get("model", {}).get("url")
+                
+                with urllib.request.urlopen(model_url) as glb_response:
+                    return Response(
+                        content=glb_response.read(),
+                        media_type="model/gltf-binary",
+                        headers={"Content-Disposition": f"attachment; filename=modelo_tripo.glb"}
+                    )
+            else:
+                return JSONResponse(status_code=400, content={"erro": "Modelo ainda não está pronto."})
     except Exception as e:
         return JSONResponse(status_code=500, content={"erro": str(e)})
 
