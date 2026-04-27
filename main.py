@@ -19,12 +19,9 @@ app.add_middleware(
 async def upload_image_to_tripo(image_base64, filename="upload.png"):
     url = "https://api.tripo3d.ai/v2/openapi/upload"
     headers = {"Authorization": f"Bearer {TRIPO_API_KEY}"}
-    
     boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW"
     headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
-    
     image_bytes = base64.b64decode(image_base64)
-    
     body = (
         f"--{boundary}\r\n"
         f"Content-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\n"
@@ -41,7 +38,7 @@ async def upload_image_to_tripo(image_base64, filename="upload.png"):
     except urllib.error.HTTPError as e:
         raise Exception(f"Erro ao fazer upload da imagem: {e.read().decode('utf-8')}")
 
-async def generate_tripo_model(prompt=None, image_token=None):
+async def create_tripo_task(prompt=None, image_token=None):
     url = "https://api.tripo3d.ai/v2/openapi/task"
     headers = {
         "Authorization": f"Bearer {TRIPO_API_KEY}",
@@ -49,59 +46,20 @@ async def generate_tripo_model(prompt=None, image_token=None):
     }
     
     if image_token:
-        payload = json.dumps({
-            "type": "image_to_model",
-            "file": {"type": "png", "file_token": image_token}
-        })
+        payload = json.dumps({"type": "image_to_model", "file": {"type": "png", "file_token": image_token}})
     else:
-        payload = json.dumps({
-            "type": "text_to_model",
-            "prompt": prompt
-        })
+        payload = json.dumps({"type": "text_to_model", "prompt": prompt})
         
-    payload_bytes = payload.encode("utf-8")
-    
-    req = urllib.request.Request(url, data=payload_bytes, headers=headers, method="POST")
+    req = urllib.request.Request(url, data=payload.encode("utf-8"), headers=headers, method="POST")
     try:
         with urllib.request.urlopen(req) as response:
             create_res = json.loads(response.read().decode("utf-8"))
+            task_id = create_res.get("data", {}).get("task_id")
+            if not task_id:
+                raise Exception("API não retornou ID de tarefa.")
+            return task_id
     except urllib.error.HTTPError as e:
         raise Exception(f"Erro na API Tripo: {e.read().decode('utf-8')}")
-        
-    task_id = create_res.get("data", {}).get("task_id")
-    if not task_id:
-        raise Exception("API não retornou ID de tarefa.")
-        
-    print(f"Tarefa {task_id} criada.")
-    
-    model_url = None
-    poll_url = f"https://api.tripo3d.ai/v2/openapi/task/{task_id}"
-    poll_req = urllib.request.Request(poll_url, headers=headers, method="GET")
-    
-    for attempt in range(150):
-        await asyncio.sleep(2)
-        try:
-            with urllib.request.urlopen(poll_req) as poll_res:
-                data = json.loads(poll_res.read().decode("utf-8")).get("data", {})
-                status = data.get("status")
-                
-                if status == "success":
-                    result = data.get("result", {})
-                    model_url = result.get("pbr_model", {}).get("url") or result.get("model", {}).get("url")
-                    break
-                elif status in ["failed", "cancelled", "unknown"]:
-                    raise Exception("A geração do modelo falhou na Tripo.")
-        except Exception:
-            continue
-            
-    if not model_url:
-        raise Exception("O modelo não pôde ser encontrado no servidor da Tripo.")
-        
-    try:
-        with urllib.request.urlopen(model_url) as glb_response:
-            return glb_response.read()
-    except Exception as e:
-        raise Exception("Erro ao baixar o arquivo GLB.")
 
 @app.get("/")
 def home():
@@ -115,14 +73,10 @@ async def gerar(req: Request):
         if not prompt:
             return JSONResponse(status_code=400, content={"erro": "Prompt vazio."})
         
-        glb_data = await generate_tripo_model(prompt=prompt)
-        
-        filename = re.sub(r"[^a-z0-9]+", "_", prompt.lower()).strip("_")[:30] + ".glb"
-        return Response(
-            content=glb_data, 
-            media_type="model/gltf-binary", 
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
-        )
+        # A Mágica Acontece Aqui: Em vez de ficar preso esperando 120 segundos,
+        # o servidor devolve o Ticket da Tarefa instantaneamente!
+        task_id = await create_tripo_task(prompt=prompt)
+        return JSONResponse({"task_id": task_id})
     except Exception as e:
         return JSONResponse(status_code=500, content={"erro": str(e)})
 
@@ -131,19 +85,35 @@ async def gerar_imagem(req: Request):
     try:
         body = await req.json()
         image_base64 = body.get("image_base64", "")
-        filename = body.get("filename", "upload.png")
-        
         if not image_base64:
             return JSONResponse(status_code=400, content={"erro": "Imagem vazia."})
             
-        image_token = await upload_image_to_tripo(image_base64, filename)
-        glb_data = await generate_tripo_model(image_token=image_token)
+        image_token = await upload_image_to_tripo(image_base64, body.get("filename", "upload.png"))
+        task_id = await create_tripo_task(image_token=image_token)
         
-        return Response(
-            content=glb_data, 
-            media_type="model/gltf-binary", 
-            headers={"Content-Disposition": f"attachment; filename=modelo_imagem.glb"}
-        )
+        return JSONResponse({"task_id": task_id})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"erro": str(e)})
+
+# Nova rota para o seu site ficar perguntando: "Ei, o ID X já terminou?"
+@app.get("/status/{task_id}")
+async def check_status(task_id: str):
+    url = f"https://api.tripo3d.ai/v2/openapi/task/{task_id}"
+    headers = {"Authorization": f"Bearer {TRIPO_API_KEY}"}
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    
+    try:
+        with urllib.request.urlopen(req) as response:
+            data = json.loads(response.read().decode("utf-8")).get("data", {})
+            status = data.get("status")
+            
+            if status == "success":
+                result = data.get("result", {})
+                model_url = result.get("pbr_model", {}).get("url") or result.get("model", {}).get("url")
+                # Quando terminar, entrega o Link do arquivo direto da Tripo3D
+                return JSONResponse({"status": "success", "model_url": model_url})
+            else:
+                return JSONResponse({"status": status})
     except Exception as e:
         return JSONResponse(status_code=500, content={"erro": str(e)})
 
