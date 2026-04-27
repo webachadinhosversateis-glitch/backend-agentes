@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-import os, json, re, asyncio
+import os, json, re, asyncio, base64
 import urllib.request
 import urllib.error
 
@@ -16,18 +16,52 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-async def generate_tripo_model(prompt):
+async def upload_image_to_tripo(image_base64, filename="upload.png"):
+    url = "https://api.tripo3d.ai/v2/openapi/upload"
+    headers = {"Authorization": f"Bearer {TRIPO_API_KEY}"}
+    
+    boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW"
+    headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
+    
+    image_bytes = base64.b64decode(image_base64)
+    
+    body = (
+        f"--{boundary}\r\n"
+        f"Content-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\n"
+        f"Content-Type: image/png\r\n\r\n"
+    ).encode('utf-8')
+    body += image_bytes
+    body += f"\r\n--{boundary}--\r\n".encode('utf-8')
+    
+    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req) as response:
+            res = json.loads(response.read().decode("utf-8"))
+            return res.get("data", {}).get("image_token")
+    except urllib.error.HTTPError as e:
+        raise Exception(f"Erro ao fazer upload da imagem: {e.read().decode('utf-8')}")
+
+async def generate_tripo_model(prompt=None, image_token=None):
     url = "https://api.tripo3d.ai/v2/openapi/task"
     headers = {
         "Authorization": f"Bearer {TRIPO_API_KEY}",
         "Content-Type": "application/json"
     }
-    payload = json.dumps({
-        "type": "text_to_model",
-        "prompt": prompt
-    }).encode("utf-8")
     
-    req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+    if image_token:
+        payload = json.dumps({
+            "type": "image_to_model",
+            "file": {"type": "png", "file_token": image_token}
+        })
+    else:
+        payload = json.dumps({
+            "type": "text_to_model",
+            "prompt": prompt
+        })
+        
+    payload_bytes = payload.encode("utf-8")
+    
+    req = urllib.request.Request(url, data=payload_bytes, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(req) as response:
             create_res = json.loads(response.read().decode("utf-8"))
@@ -44,7 +78,7 @@ async def generate_tripo_model(prompt):
     poll_url = f"https://api.tripo3d.ai/v2/openapi/task/{task_id}"
     poll_req = urllib.request.Request(poll_url, headers=headers, method="GET")
     
-    for attempt in range(100):
+    for attempt in range(150):
         await asyncio.sleep(2)
         try:
             with urllib.request.urlopen(poll_req) as poll_res:
@@ -53,7 +87,6 @@ async def generate_tripo_model(prompt):
                 
                 if status == "success":
                     result = data.get("result", {})
-                    # A Tripo3D usa pbr_model ou model dependendo da versão
                     model_url = result.get("pbr_model", {}).get("url") or result.get("model", {}).get("url")
                     break
                 elif status in ["failed", "cancelled", "unknown"]:
@@ -82,13 +115,34 @@ async def gerar(req: Request):
         if not prompt:
             return JSONResponse(status_code=400, content={"erro": "Prompt vazio."})
         
-        glb_data = await generate_tripo_model(prompt)
+        glb_data = await generate_tripo_model(prompt=prompt)
         
         filename = re.sub(r"[^a-z0-9]+", "_", prompt.lower()).strip("_")[:30] + ".glb"
         return Response(
             content=glb_data, 
             media_type="model/gltf-binary", 
             headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"erro": str(e)})
+
+@app.post("/gerar-imagem")
+async def gerar_imagem(req: Request):
+    try:
+        body = await req.json()
+        image_base64 = body.get("image_base64", "")
+        filename = body.get("filename", "upload.png")
+        
+        if not image_base64:
+            return JSONResponse(status_code=400, content={"erro": "Imagem vazia."})
+            
+        image_token = await upload_image_to_tripo(image_base64, filename)
+        glb_data = await generate_tripo_model(image_token=image_token)
+        
+        return Response(
+            content=glb_data, 
+            media_type="model/gltf-binary", 
+            headers={"Content-Disposition": f"attachment; filename=modelo_imagem.glb"}
         )
     except Exception as e:
         return JSONResponse(status_code=500, content={"erro": str(e)})
