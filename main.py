@@ -44,7 +44,7 @@ async def generate_tripo_model(prompt):
     poll_url = f"https://api.tripo3d.ai/v2/openapi/task/{task_id}"
     poll_req = urllib.request.Request(poll_url, headers=headers, method="GET")
     
-    for attempt in range(60):
+    for attempt in range(100):
         await asyncio.sleep(2)
         try:
             with urllib.request.urlopen(poll_req) as poll_res:
@@ -52,15 +52,17 @@ async def generate_tripo_model(prompt):
                 status = data.get("status")
                 
                 if status == "success":
-                    model_url = data.get("result", {}).get("model", {}).get("url")
+                    result = data.get("result", {})
+                    # A Tripo3D usa pbr_model ou model dependendo da versão
+                    model_url = result.get("pbr_model", {}).get("url") or result.get("model", {}).get("url")
                     break
                 elif status in ["failed", "cancelled", "unknown"]:
-                    raise Exception("A geração do modelo falhou.")
+                    raise Exception("A geração do modelo falhou na Tripo.")
         except Exception:
             continue
             
     if not model_url:
-        raise Exception("Tempo limite esgotado.")
+        raise Exception("O modelo não pôde ser encontrado no servidor da Tripo.")
         
     try:
         with urllib.request.urlopen(model_url) as glb_response:
