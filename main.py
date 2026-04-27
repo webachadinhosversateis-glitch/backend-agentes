@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request
-from fastapi.responses import Response, JSONResponse
+from fastapi.responses import Response, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 import os, json, re, asyncio, base64
 import urllib.request
@@ -113,7 +113,6 @@ async def check_status(task_id: str):
     except Exception as e:
         return JSONResponse(status_code=500, content={"erro": str(e)})
 
-# O Proxy Mágico: Pega o arquivo da Tripo e passa pro navegador sem o erro do CORS!
 @app.get("/download/{task_id}")
 async def download_model(task_id: str):
     url = f"https://api.tripo3d.ai/v2/openapi/task/{task_id}"
@@ -129,12 +128,24 @@ async def download_model(task_id: str):
                 result = data.get("result", {})
                 model_url = result.get("pbr_model", {}).get("url") or result.get("model", {}).get("url")
                 
-                with urllib.request.urlopen(model_url) as glb_response:
-                    return Response(
-                        content=glb_response.read(),
-                        media_type="model/gltf-binary",
-                        headers={"Content-Disposition": f"attachment; filename=modelo_tripo.glb"}
-                    )
+                # Streaming Response mágico para manter a conexão aberta com o Railway!
+                def iterfile():
+                    with urllib.request.urlopen(model_url) as glb_response:
+                        while True:
+                            # Envia os pacotes de 32 em 32KB
+                            chunk = glb_response.read(8192 * 4)
+                            if not chunk:
+                                break
+                            yield chunk
+                            
+                return StreamingResponse(
+                    iterfile(),
+                    media_type="model/gltf-binary",
+                    headers={
+                        "Content-Disposition": "attachment; filename=modelo_tripo.glb",
+                        "Access-Control-Allow-Origin": "*" # Garante que não teremos erros de CORS no navegador
+                    }
+                )
             else:
                 return JSONResponse(status_code=400, content={"erro": "Modelo ainda não está pronto."})
     except Exception as e:
