@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request
-from fastapi.responses import Response, JSONResponse, StreamingResponse
+from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import os, json, re, asyncio, base64
 import urllib.request
@@ -128,24 +128,19 @@ async def download_model(task_id: str):
                 result = data.get("result", {})
                 model_url = result.get("pbr_model", {}).get("url") or result.get("model", {}).get("url")
                 
-                # Streaming Response mágico para manter a conexão aberta com o Railway!
-                def iterfile():
-                    with urllib.request.urlopen(model_url) as glb_response:
-                        while True:
-                            # Envia os pacotes de 32 em 32KB
-                            chunk = glb_response.read(8192 * 4)
-                            if not chunk:
-                                break
-                            yield chunk
-                            
-                return StreamingResponse(
-                    iterfile(),
-                    media_type="model/gltf-binary",
-                    headers={
-                        "Content-Disposition": "attachment; filename=modelo_tripo.glb",
-                        "Access-Control-Allow-Origin": "*" # Garante que não teremos erros de CORS no navegador
-                    }
-                )
+                # Faz o download integral de forma veloz
+                with urllib.request.urlopen(model_url) as glb_response:
+                    file_data = glb_response.read()
+                    
+                    # Entrega com o carimbo do CORS obrigatório para o Google Chrome!
+                    return Response(
+                        content=file_data,
+                        media_type="model/gltf-binary",
+                        headers={
+                            "Content-Disposition": "attachment; filename=modelo_tripo.glb",
+                            "Access-Control-Allow-Origin": "*"
+                        }
+                    )
             else:
                 return JSONResponse(status_code=400, content={"erro": "Modelo ainda não está pronto."})
     except Exception as e:
